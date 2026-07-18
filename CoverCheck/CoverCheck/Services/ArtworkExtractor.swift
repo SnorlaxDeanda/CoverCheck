@@ -27,20 +27,28 @@ enum ArtworkExtractor {
             let metadata = try await asset.load(.commonMetadata)
             let formatMetadata = try await asset.load(.metadata)
 
-            let title = await stringValue(for: .commonKeyTitle, in: metadata)
+            let title = (await stringValue(for: .commonKeyTitle, in: metadata))
                 ?? url.deletingPathExtension().lastPathComponent
-            let artist = await stringValue(for: .commonKeyArtist, in: metadata) ?? ""
-            let album = await stringValue(for: .commonKeyAlbumName, in: metadata) ?? ""
-            let albumArtist = await stringValue(forKey: "albumArtist", in: formatMetadata)
-                ?? await stringValue(forKey: "TPE2", in: formatMetadata)
-                ?? artist
-            let year = await stringValue(for: .commonKeyCreationDate, in: metadata)
-            let trackNumber = await intValue(forKey: "trackNumber", in: formatMetadata)
-                ?? await intValue(forKey: "TRCK", in: formatMetadata)
-            let discNumber = await intValue(forKey: "discNumber", in: formatMetadata)
-                ?? await intValue(forKey: "TPOS", in: formatMetadata)
+            let artist = (await stringValue(for: .commonKeyArtist, in: metadata)) ?? ""
+            let album = (await stringValue(for: .commonKeyAlbumName, in: metadata)) ?? ""
 
-            let artworkData = await artworkData(from: metadata) ?? await artworkData(from: formatMetadata)
+            let albumArtistFromTag = await stringValue(forKey: "albumArtist", in: formatMetadata)
+            let albumArtistFromTPE2 = await stringValue(forKey: "TPE2", in: formatMetadata)
+            let albumArtist = albumArtistFromTag ?? albumArtistFromTPE2 ?? artist
+
+            let year = await stringValue(for: .commonKeyCreationDate, in: metadata)
+
+            let trackNumberPrimary = await intValue(forKey: "trackNumber", in: formatMetadata)
+            let trackNumberFallback = await intValue(forKey: "TRCK", in: formatMetadata)
+            let trackNumber = trackNumberPrimary ?? trackNumberFallback
+
+            let discNumberPrimary = await intValue(forKey: "discNumber", in: formatMetadata)
+            let discNumberFallback = await intValue(forKey: "TPOS", in: formatMetadata)
+            let discNumber = discNumberPrimary ?? discNumberFallback
+
+            let commonArtwork = await artworkData(from: metadata)
+            let formatArtwork = await artworkData(from: formatMetadata)
+            let artworkData = commonArtwork ?? formatArtwork
             let hash = artworkData.flatMap { ImageHasher.averageHash(from: $0) }
             let pixelSize = artworkData.flatMap(imagePixelSize)
 

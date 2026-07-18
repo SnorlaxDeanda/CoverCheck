@@ -21,8 +21,13 @@ actor ArtworkLookupService {
             return cached
         }
 
-        let result = await fetchFromITunes(artist: artist, album: album)
-            ?? await fetchFromCoverArtArchive(artist: artist, album: album)
+        let iTunesResult = await fetchFromITunes(artist: artist, album: album)
+        let result: ReferenceArtwork?
+        if let iTunesResult {
+            result = iTunesResult
+        } else {
+            result = await fetchFromCoverArtArchive(artist: artist, album: album)
+        }
         cache[key] = result
         return result
     }
