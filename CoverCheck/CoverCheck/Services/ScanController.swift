@@ -239,7 +239,9 @@ final class ScanController: ObservableObject {
         do {
             let jpeg = try ArtworkWriter.jpegData(from: imageData)
             let result = await ArtworkWriter.apply(jpegData: jpeg, to: album.tracks, updateFolderCover: true) { current, total in
-                self.phase = .applying(current: current, total: total)
+                if current == 1 || current == total || current % 4 == 0 {
+                    self.phase = .applying(current: current, total: total)
+                }
             }
 
             let refreshed = await reloadAlbum(album)

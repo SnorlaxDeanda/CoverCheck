@@ -10,9 +10,22 @@ struct ReferenceArtwork: Sendable {
 actor ArtworkLookupService {
     private let session: URLSession
     private var cache: [String: ReferenceArtwork?] = [:]
+    private var lastMusicBrainzRequest: ContinuousClock.Instant?
+    /// MusicBrainz asks clients to stay at ~1 request/second.
+    private let musicBrainzMinimumInterval: Duration = .milliseconds(1100)
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 20
+            config.timeoutIntervalForResource = 45
+            config.httpAdditionalHeaders = [
+                "User-Agent": "CoverCheck/1.0 (macOS; album art verifier; https://github.com/SnorlaxDeanda/CoverCheck)"
+            ]
+            self.session = URLSession(configuration: config)
+        }
     }
 
     func lookup(artist: String, album: String) async -> ReferenceArtwork? {
@@ -30,6 +43,16 @@ actor ArtworkLookupService {
         }
         cache[key] = result
         return result
+    }
+
+    private func waitForMusicBrainzSlot() async {
+        if let last = lastMusicBrainzRequest {
+            let elapsed = last.duration(to: .now)
+            if elapsed < musicBrainzMinimumInterval {
+                try? await Task.sleep(for: musicBrainzMinimumInterval - elapsed)
+            }
+        }
+        lastMusicBrainzRequest = .now
     }
 
     // MARK: - iTunes Search API
@@ -81,8 +104,13 @@ actor ArtworkLookupService {
         ]
         guard let url = components.url else { return nil }
 
+        await waitForMusicBrainzSlot()
+
         var request = URLRequest(url: url)
-        request.setValue("CoverCheck/1.0 (macOS album art verifier)", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "CoverCheck/1.0 (macOS; album art verifier; https://github.com/SnorlaxDeanda/CoverCheck)",
+            forHTTPHeaderField: "User-Agent"
+        )
 
         do {
             let (data, response) = try await session.data(for: request)

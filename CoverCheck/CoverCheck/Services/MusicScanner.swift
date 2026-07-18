@@ -25,6 +25,7 @@ final class MusicScanner: @unchecked Sendable {
     ) async throws -> ScanSummary {
         reset()
         let started = Date()
+        let progress = ProgressThrottler<ScanPhase>(intervalMilliseconds: 120)
 
         await onPhase(.enumerating)
         let files = try enumerateAudioFiles(in: root)
@@ -35,11 +36,14 @@ final class MusicScanner: @unchecked Sendable {
 
         for (index, file) in files.enumerated() {
             if isCancelled { await onPhase(.cancelled); throw CancellationError() }
-            await onPhase(.readingTags(current: index + 1, total: files.count))
+            let phase = ScanPhase.readingTags(current: index + 1, total: files.count)
+            let force = index == 0 || index + 1 == files.count || (index + 1) % 8 == 0
+            await progress.submit(phase, force: force, emit: onPhase)
             if let track = await ArtworkExtractor.loadTrack(from: file) {
                 tracks.append(track)
             }
         }
+        await progress.flush(emit: onPhase)
 
         let grouped = Dictionary(grouping: tracks, by: \.albumKey)
         let keys = grouped.keys.sorted()
@@ -48,7 +52,9 @@ final class MusicScanner: @unchecked Sendable {
 
         for (index, key) in keys.enumerated() {
             if isCancelled { await onPhase(.cancelled); throw CancellationError() }
-            await onPhase(.verifying(current: index + 1, total: keys.count))
+            let phase = ScanPhase.verifying(current: index + 1, total: keys.count)
+            let force = index == 0 || index + 1 == keys.count
+            await progress.submit(phase, force: force, emit: onPhase)
 
             guard let albumTracks = grouped[key], let first = albumTracks.first else { continue }
             let folderArt = ArtworkExtractor.folderArtwork(in: first.url.deletingLastPathComponent())
@@ -72,6 +78,7 @@ final class MusicScanner: @unchecked Sendable {
             )
             albums.append(verification)
         }
+        await progress.flush(emit: onPhase)
 
         albums.sort {
             if $0.status.isIssue != $1.status.isIssue {

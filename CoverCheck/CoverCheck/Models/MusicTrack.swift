@@ -110,7 +110,7 @@ struct AlbumVerification: Identifiable, Hashable {
     }
 }
 
-enum ScanPhase: Equatable {
+enum ScanPhase: Equatable, Sendable {
     case idle
     case enumerating
     case readingTags(current: Int, total: Int)
