@@ -165,7 +165,7 @@ enum ID3ArtworkWriter {
 
         let temp = url.appendingPathExtension("covercheck-tmp")
         try output.write(to: temp, options: .atomic)
-        try FileManager.default.replaceItemAt(url, withItemAt: temp)
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
     }
 
     private static func parseID3v2(_ data: Data) -> (tagSize: Int, frames: [Data]) {
