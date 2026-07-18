@@ -291,7 +291,7 @@ enum MPEG4ArtworkWriter {
 
         let artwork = AVMutableMetadataItem()
         artwork.identifier = .commonIdentifierArtwork
-        artwork.dataValue = jpegData
+        artwork.value = jpegData as NSData
 
         let ext = url.pathExtension.lowercased()
         let outputType: AVFileType = (ext == "mp4") ? .mp4 : .m4a
