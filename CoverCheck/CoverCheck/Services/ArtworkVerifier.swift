@@ -12,11 +12,15 @@ enum ArtworkVerifier {
         tracks: [MusicTrack],
         folderArtwork: Data?,
         reference: ReferenceArtwork?,
-        options: VerificationOptions
+        options: VerificationOptions,
+        approvalStore: ApprovedArtworkStore = .shared,
+        existingID: UUID? = nil
     ) -> AlbumVerification {
         let artist = tracks.first?.displayArtist ?? "Unknown Artist"
         let album = tracks.first?.displayAlbum ?? "Unknown Album"
+        let albumKey = tracks.first?.albumKey ?? "\(artist.lowercased())|\(album.lowercased())"
         let embedded = tracks.first(where: { $0.artworkData != nil })?.artworkData
+        let embeddedHash = tracks.compactMap(\.artworkHash).first
 
         var messages: [String] = []
         var status: ArtworkStatus = .ok
@@ -48,9 +52,9 @@ enum ArtworkVerifier {
         if options.compareWithFolderArt {
             if let folderArtwork {
                 let folderHash = ImageHasher.averageHash(from: folderArtwork)
-                let embeddedHash = distinctHashes.first
-                if let folderHash, let embeddedHash {
-                    let score = ImageHasher.similarity(folderHash, embeddedHash)
+                let currentEmbeddedHash = distinctHashes.first
+                if let folderHash, let currentEmbeddedHash {
+                    let score = ImageHasher.similarity(folderHash, currentEmbeddedHash)
                     if score < options.similarityThreshold {
                         status = worse(status, .folderMismatch)
                         messages.append(String(
@@ -68,8 +72,8 @@ enum ArtworkVerifier {
 
         var similarity: Double?
         if options.compareWithOnlineReference, let reference {
-            if let embeddedHash = distinctHashes.first {
-                let score = ImageHasher.similarity(embeddedHash, reference.hash)
+            if let currentEmbeddedHash = distinctHashes.first {
+                let score = ImageHasher.similarity(currentEmbeddedHash, reference.hash)
                 similarity = score
                 if score < options.similarityThreshold {
                     status = worse(status, .likelyWrong)
@@ -93,12 +97,17 @@ enum ArtworkVerifier {
             messages.append("Could not find an online reference cover for this album.")
         }
 
-        if status == .ok && messages.isEmpty {
+        let userApproved = approvalStore.isApproved(albumKey: albumKey, artworkHash: embeddedHash)
+        if userApproved {
+            status = .approved
+            messages.insert("You marked this cover as correct.", at: 0)
+        } else if status == .ok && messages.isEmpty {
             messages.append("Embedded artwork looks consistent and correct.")
         }
 
         return AlbumVerification(
-            id: UUID(),
+            id: existingID ?? UUID(),
+            albumKey: albumKey,
             artist: artist,
             album: album,
             tracks: tracks.sorted(by: trackSort),
@@ -108,13 +117,15 @@ enum ArtworkVerifier {
             folderArtworkData: folderArtwork,
             referenceArtworkData: reference?.data,
             referenceSource: reference?.source,
-            similarityScore: similarity
+            similarityScore: similarity,
+            isUserApproved: userApproved
         )
     }
 
     private static func worse(_ current: ArtworkStatus, _ candidate: ArtworkStatus) -> ArtworkStatus {
         let rank: [ArtworkStatus: Int] = [
             .ok: 0,
+            .approved: 0,
             .unverified: 1,
             .missing: 2,
             .folderMismatch: 3,

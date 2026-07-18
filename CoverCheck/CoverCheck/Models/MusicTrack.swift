@@ -36,6 +36,7 @@ struct MusicTrack: Identifiable, Hashable {
 
 enum ArtworkStatus: String, CaseIterable, Identifiable {
     case ok = "OK"
+    case approved = "Approved"
     case missing = "Missing"
     case inconsistent = "Inconsistent"
     case folderMismatch = "Folder Mismatch"
@@ -47,6 +48,7 @@ enum ArtworkStatus: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .ok: return "checkmark.seal.fill"
+        case .approved: return "hand.thumbsup.fill"
         case .missing: return "photo.badge.exclamationmark"
         case .inconsistent: return "square.on.square.dashed"
         case .folderMismatch: return "folder.badge.questionmark"
@@ -57,7 +59,7 @@ enum ArtworkStatus: String, CaseIterable, Identifiable {
 
     var tint: ColorToken {
         switch self {
-        case .ok: return .ok
+        case .ok, .approved: return .ok
         case .missing: return .warning
         case .inconsistent: return .warning
         case .folderMismatch: return .warning
@@ -67,7 +69,12 @@ enum ArtworkStatus: String, CaseIterable, Identifiable {
     }
 
     var isIssue: Bool {
-        self != .ok && self != .unverified
+        switch self {
+        case .ok, .approved, .unverified:
+            return false
+        case .missing, .inconsistent, .folderMismatch, .likelyWrong:
+            return true
+        }
     }
 }
 
@@ -77,6 +84,7 @@ enum ColorToken {
 
 struct AlbumVerification: Identifiable, Hashable {
     let id: UUID
+    let albumKey: String
     let artist: String
     let album: String
     let tracks: [MusicTrack]
@@ -87,8 +95,13 @@ struct AlbumVerification: Identifiable, Hashable {
     let referenceArtworkData: Data?
     let referenceSource: String?
     let similarityScore: Double?
+    let isUserApproved: Bool
 
     var trackCount: Int { tracks.count }
+
+    var representativeArtworkHash: String? {
+        tracks.compactMap(\.artworkHash).first
+    }
 
     var artworkCoverage: Double {
         guard !tracks.isEmpty else { return 0 }
@@ -102,6 +115,7 @@ enum ScanPhase: Equatable {
     case enumerating
     case readingTags(current: Int, total: Int)
     case verifying(current: Int, total: Int)
+    case applying(current: Int, total: Int)
     case finished
     case cancelled
     case failed(String)
@@ -114,6 +128,8 @@ enum ScanPhase: Equatable {
             return "Reading tags \(current)/\(total)"
         case .verifying(let current, let total):
             return "Verifying artwork \(current)/\(total)"
+        case .applying(let current, let total):
+            return "Updating artwork \(current)/\(total)"
         case .finished: return "Scan complete"
         case .cancelled: return "Scan cancelled"
         case .failed(let message): return "Failed: \(message)"
@@ -122,7 +138,9 @@ enum ScanPhase: Equatable {
 
     var progress: Double? {
         switch self {
-        case .readingTags(let current, let total), .verifying(let current, let total):
+        case .readingTags(let current, let total),
+             .verifying(let current, let total),
+             .applying(let current, let total):
             guard total > 0 else { return 0 }
             return Double(current) / Double(total)
         case .finished: return 1

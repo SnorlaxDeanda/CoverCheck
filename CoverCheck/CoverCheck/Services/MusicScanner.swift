@@ -67,7 +67,8 @@ final class MusicScanner: @unchecked Sendable {
                 tracks: albumTracks,
                 folderArtwork: folderArt,
                 reference: reference,
-                options: options
+                options: options,
+                approvalStore: .shared
             )
             albums.append(verification)
         }

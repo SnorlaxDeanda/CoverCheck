@@ -7,7 +7,7 @@ struct ResultsWorkspace: View {
         VStack(spacing: 0) {
             ToolbarHeader()
 
-            if controller.isScanning {
+            if controller.isScanning || controller.isApplyingArtwork {
                 ScanProgressBanner()
                     .padding(.horizontal, 20)
                     .padding(.bottom, 12)
@@ -76,10 +76,10 @@ struct ToolbarHeader: View {
             Button {
                 Task { await controller.startScan() }
             } label: {
-                Label(controller.isScanning ? "Scanning" : "Rescan", systemImage: "arrow.clockwise")
+                Label(controller.isBusy ? "Working…" : "Rescan", systemImage: "arrow.clockwise")
             }
             .buttonStyle(GlowButtonStyle(filled: true))
-            .disabled(controller.rootURL == nil || controller.isScanning)
+            .disabled(controller.rootURL == nil || controller.isBusy)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -122,13 +122,19 @@ struct AlbumListPane: View {
                         .fill(Color.white.opacity(0.04))
                 )
 
-                Picker("Filter", selection: $controller.statusFilter) {
-                    ForEach(StatusFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                HStack {
+                    Text("Show")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(CoverCheckTheme.textSecondary)
+                    Picker("Filter", selection: $controller.statusFilter) {
+                        ForEach(StatusFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    Spacer()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
             .padding(14)
 

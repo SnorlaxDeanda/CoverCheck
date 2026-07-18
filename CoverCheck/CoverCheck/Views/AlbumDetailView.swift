@@ -9,6 +9,7 @@ struct AlbumDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 header
+                actionBar
                 artworkComparison
                 messagesSection
                 tracksSection
@@ -72,19 +73,107 @@ struct AlbumDetailView: View {
         }
     }
 
+    private var actionBar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Actions")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(CoverCheckTheme.textPrimary)
+
+            HStack(spacing: 10) {
+                if album.isUserApproved {
+                    Button {
+                        controller.clearApproval(album)
+                    } label: {
+                        Label("Clear Approval", systemImage: "hand.thumbsup")
+                    }
+                    .buttonStyle(GlowButtonStyle())
+                    .disabled(controller.isBusy)
+                } else {
+                    Button {
+                        controller.markAsCorrect(album)
+                    } label: {
+                        Label("Mark as Correct", systemImage: "hand.thumbsup.fill")
+                    }
+                    .buttonStyle(GlowButtonStyle(filled: true))
+                    .disabled(controller.isBusy)
+                    .help("Tell CoverCheck this cover is correct and skip flagging it on future scans.")
+                }
+
+                Button {
+                    Task { await controller.chooseAndApplyCover(to: album) }
+                } label: {
+                    Label("Choose Image…", systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(GlowButtonStyle())
+                .disabled(controller.isBusy)
+
+                Spacer(minLength: 0)
+            }
+
+            if let message = controller.actionMessage {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(CoverCheckTheme.accent)
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(CoverCheckTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("Dismiss") {
+                        controller.dismissActionMessage()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(CoverCheckTheme.accent)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                )
+            }
+        }
+    }
+
     private var artworkComparison: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Artwork comparison")
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundStyle(CoverCheckTheme.textPrimary)
 
+            Text("Use Apply to embed a cover into every track in this album and update cover.jpg.")
+                .font(.system(size: 12, weight: .regular, design: .rounded))
+                .foregroundStyle(CoverCheckTheme.textSecondary)
+
             HStack(alignment: .top, spacing: 20) {
-                ArtworkColumn(title: "Embedded", data: album.embeddedArtworkData)
-                ArtworkColumn(title: "Folder", data: album.folderArtworkData, placeholder: "folder")
+                ArtworkColumn(
+                    title: "Embedded",
+                    data: album.embeddedArtworkData,
+                    actionTitle: nil,
+                    actionEnabled: false,
+                    action: {}
+                )
+
+                ArtworkColumn(
+                    title: "Folder",
+                    data: album.folderArtworkData,
+                    placeholder: "folder",
+                    actionTitle: "Apply",
+                    actionEnabled: album.folderArtworkData != nil && !controller.isBusy,
+                    action: {
+                        Task { await controller.applyFolderCover(to: album) }
+                    }
+                )
+
                 ArtworkColumn(
                     title: album.referenceSource.map { "Reference · \($0)" } ?? "Reference",
                     data: album.referenceArtworkData,
-                    placeholder: "globe"
+                    placeholder: "globe",
+                    actionTitle: "Apply",
+                    actionEnabled: album.referenceArtworkData != nil && !controller.isBusy,
+                    action: {
+                        Task { await controller.applyReferenceCover(to: album) }
+                    }
                 )
             }
         }
@@ -185,6 +274,9 @@ struct ArtworkColumn: View {
     let title: String
     let data: Data?
     var placeholder: String = "music.note"
+    var actionTitle: String? = nil
+    var actionEnabled: Bool = false
+    var action: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 10) {
@@ -197,6 +289,13 @@ struct ArtworkColumn: View {
                 .foregroundStyle(CoverCheckTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(width: 160)
+
+            if let actionTitle {
+                Button(actionTitle, action: action)
+                    .buttonStyle(GlowButtonStyle(filled: actionEnabled))
+                    .disabled(!actionEnabled)
+                    .controlSize(.small)
+            }
         }
         .frame(maxWidth: .infinity)
     }
