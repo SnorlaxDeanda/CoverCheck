@@ -118,14 +118,19 @@ final class ScanController: ObservableObject {
         trackCount = 0
         duration = 0
         actionMessage = nil
+        phase = .enumerating
 
         let options = self.options
+        let scanner = self.scanner
+
         scanTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let summary = try await scanner.scan(root: rootURL, options: options) { phase in
-                    self.phase = phase
-                }
+                let summary = try await self.performScan(
+                    scanner: scanner,
+                    root: rootURL,
+                    options: options
+                )
                 self.albums = summary.albums
                 self.trackCount = summary.trackCount
                 self.duration = summary.duration
@@ -139,6 +144,46 @@ final class ScanController: ObservableObject {
         }
 
         await scanTask?.value
+    }
+
+    /// Runs the heavy scan off the main actor and hops back only for UI phase updates.
+    private func performScan(
+        scanner: MusicScanner,
+        root: URL,
+        options: VerificationOptions
+    ) async throws -> ScanSummary {
+        let (phaseStream, phaseContinuation) = AsyncStream.makeStream(
+            of: ScanPhase.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+
+        let uiTask = Task { [weak self] in
+            for await phase in phaseStream {
+                self?.phase = phase
+            }
+        }
+
+        let detachedScan = Task.detached(priority: .userInitiated) {
+            try await scanner.scan(root: root, options: options) { phase in
+                phaseContinuation.yield(phase)
+            }
+        }
+
+        do {
+            let summary = try await withTaskCancellationHandler {
+                try await detachedScan.value
+            } onCancel: {
+                detachedScan.cancel()
+                scanner.cancel()
+            }
+            phaseContinuation.finish()
+            await uiTask.value
+            return summary
+        } catch {
+            phaseContinuation.finish()
+            uiTask.cancel()
+            throw error
+        }
     }
 
     func cancelScan() {

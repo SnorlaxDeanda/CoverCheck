@@ -19,8 +19,9 @@ actor ArtworkLookupService {
             self.session = session
         } else {
             let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 20
-            config.timeoutIntervalForResource = 45
+            config.timeoutIntervalForRequest = 12
+            config.timeoutIntervalForResource = 20
+            config.waitsForConnectivity = false
             config.httpAdditionalHeaders = [
                 "User-Agent": "CoverCheck/1.0 (macOS; album art verifier; https://github.com/SnorlaxDeanda/CoverCheck)"
             ]
@@ -34,6 +35,7 @@ actor ArtworkLookupService {
             return cached
         }
 
+        // Prefer iTunes — usually fast and reliable. CAA often redirects to archive.org and times out.
         let iTunesResult = await fetchFromITunes(artist: artist, album: album)
         let result: ReferenceArtwork?
         if let iTunesResult {
@@ -80,7 +82,7 @@ actor ArtworkLookupService {
                 return nil
             }
 
-            let (imageData, _) = try await session.data(from: artworkURL)
+            let imageData = try await fetchImageData(from: artworkURL, timeout: 10)
             guard let hash = ImageHasher.averageHash(from: imageData) else { return nil }
             return ReferenceArtwork(
                 data: imageData,
@@ -107,6 +109,7 @@ actor ArtworkLookupService {
         await waitForMusicBrainzSlot()
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 10
         request.setValue(
             "CoverCheck/1.0 (macOS; album art verifier; https://github.com/SnorlaxDeanda/CoverCheck)",
             forHTTPHeaderField: "User-Agent"
@@ -121,13 +124,15 @@ actor ArtworkLookupService {
             let decoded = try JSONDecoder().decode(MusicBrainzReleaseSearch.self, from: data)
             guard let releaseID = decoded.releases.first?.id else { return nil }
 
-            let coverURL = URL(string: "https://coverartarchive.org/release/\(releaseID)/front-500")!
-            let (imageData, imageResponse) = try await session.data(from: coverURL)
-            guard let imageHTTP = imageResponse as? HTTPURLResponse,
-                  (200..<300).contains(imageHTTP.statusCode),
-                  let hash = ImageHasher.averageHash(from: imageData) else {
-                return nil
+            // Prefer JSON metadata with an explicit thumbnail URL (avoids long archive.org redirects).
+            if let fromJSON = await fetchCoverArtFromReleaseJSON(releaseID: releaseID) {
+                return fromJSON
             }
+
+            // Fallback: smaller front image with a short timeout.
+            let coverURL = URL(string: "https://coverartarchive.org/release/\(releaseID)/front-250")!
+            let imageData = try await fetchImageData(from: coverURL, timeout: 8)
+            guard let hash = ImageHasher.averageHash(from: imageData) else { return nil }
 
             return ReferenceArtwork(
                 data: imageData,
@@ -138,6 +143,51 @@ actor ArtworkLookupService {
         } catch {
             return nil
         }
+    }
+
+    private func fetchCoverArtFromReleaseJSON(releaseID: String) async -> ReferenceArtwork? {
+        guard let metaURL = URL(string: "https://coverartarchive.org/release/\(releaseID)") else {
+            return nil
+        }
+
+        var request = URLRequest(url: metaURL)
+        request.timeoutInterval = 8
+        request.setValue(
+            "CoverCheck/1.0 (macOS; album art verifier; https://github.com/SnorlaxDeanda/CoverCheck)",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return nil
+            }
+
+            let decoded = try JSONDecoder().decode(CoverArtArchiveRelease.self, from: data)
+            guard let imageURL = decoded.preferredImageURL else { return nil }
+
+            let imageData = try await fetchImageData(from: imageURL, timeout: 8)
+            guard let hash = ImageHasher.averageHash(from: imageData) else { return nil }
+
+            return ReferenceArtwork(
+                data: imageData,
+                hash: hash,
+                source: "Cover Art Archive",
+                artworkURL: imageURL
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetchImageData(from url: URL, timeout: TimeInterval) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+        return data
     }
 
     private func fuzzyContains(_ haystack: String?, _ needle: String) -> Bool {
@@ -172,4 +222,34 @@ private struct MusicBrainzReleaseSearch: Decodable {
 
 private struct MusicBrainzRelease: Decodable {
     let id: String
+}
+
+private struct CoverArtArchiveRelease: Decodable {
+    let images: [CoverArtArchiveImage]
+
+    var preferredImageURL: URL? {
+        let front = images.first(where: { $0.front }) ?? images.first
+        guard let front else { return nil }
+        if let small = front.thumbnails?.small, let url = URL(string: small) {
+            return url
+        }
+        if let large = front.thumbnails?.large, let url = URL(string: large) {
+            return url
+        }
+        if let image = front.image {
+            return URL(string: image)
+        }
+        return nil
+    }
+}
+
+private struct CoverArtArchiveImage: Decodable {
+    let front: Bool
+    let image: String?
+    let thumbnails: CoverArtArchiveThumbnails?
+}
+
+private struct CoverArtArchiveThumbnails: Decodable {
+    let small: String?
+    let large: String?
 }

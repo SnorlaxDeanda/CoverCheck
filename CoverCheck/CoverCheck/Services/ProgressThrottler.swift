@@ -12,7 +12,11 @@ actor ProgressThrottler<Value: Equatable & Sendable> {
     }
 
     /// Emit immediately for the first value, then at most once per interval. Always flushes the latest.
-    func submit(_ value: Value, force: Bool = false, emit: @MainActor @escaping (Value) -> Void) async {
+    func submit(
+        _ value: Value,
+        force: Bool = false,
+        emit: @escaping (Value) async -> Void
+    ) async {
         if !force, let lastEmitted, lastEmitted == value {
             return
         }
@@ -28,7 +32,7 @@ actor ProgressThrottler<Value: Equatable & Sendable> {
         }
     }
 
-    func flush(emit: @MainActor @escaping (Value) -> Void) async {
+    func flush(emit: @escaping (Value) async -> Void) async {
         guard let pending else { return }
         let value = pending
         self.pending = nil

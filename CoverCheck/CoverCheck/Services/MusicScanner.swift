@@ -21,7 +21,7 @@ final class MusicScanner: @unchecked Sendable {
     func scan(
         root: URL,
         options: VerificationOptions,
-        onPhase: @MainActor @escaping (ScanPhase) -> Void
+        onPhase: @escaping (ScanPhase) async -> Void
     ) async throws -> ScanSummary {
         reset()
         let started = Date()

@@ -138,7 +138,15 @@ struct AlbumListPane: View {
             }
             .padding(14)
 
-            List(selection: $controller.selectedAlbumID) {
+            List(selection: Binding(
+                get: { controller.selectedAlbumID },
+                set: { newValue in
+                    // Defer so SwiftUI isn't publishing ObservableObject changes mid-update.
+                    Task { @MainActor in
+                        controller.selectedAlbumID = newValue
+                    }
+                }
+            )) {
                 ForEach(controller.filteredAlbums) { album in
                     AlbumRow(album: album)
                         .tag(album.id)

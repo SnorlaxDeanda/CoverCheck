@@ -11,6 +11,7 @@ final class ApprovedArtworkStore {
 
     private let defaultsKey = "covercheck.approvedArtwork"
     private let defaults: UserDefaults
+    private let lock = NSLock()
     private var entries: [String: ApprovedArtworkEntry]
 
     init(defaults: UserDefaults = .standard) {
@@ -24,38 +25,50 @@ final class ApprovedArtworkStore {
     }
 
     func isApproved(albumKey: String, artworkHash: String?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         guard let entry = entries[albumKey] else { return false }
         return entry.artworkHash == normalizedHash(artworkHash)
     }
 
     func approval(for albumKey: String) -> ApprovedArtworkEntry? {
-        entries[albumKey]
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[albumKey]
     }
 
     func approve(albumKey: String, artworkHash: String?) {
+        lock.lock()
         entries[albumKey] = ApprovedArtworkEntry(
             artworkHash: normalizedHash(artworkHash),
             approvedAt: Date()
         )
-        persist()
+        let snapshot = entries
+        lock.unlock()
+        persist(snapshot)
     }
 
     func clear(albumKey: String) {
+        lock.lock()
         entries.removeValue(forKey: albumKey)
-        persist()
+        let snapshot = entries
+        lock.unlock()
+        persist(snapshot)
     }
 
     func clearAll() {
+        lock.lock()
         entries.removeAll()
-        persist()
+        lock.unlock()
+        persist([:])
     }
 
     private func normalizedHash(_ hash: String?) -> String {
         hash ?? ""
     }
 
-    private func persist() {
-        if let data = try? JSONEncoder().encode(entries) {
+    private func persist(_ snapshot: [String: ApprovedArtworkEntry]) {
+        if let data = try? JSONEncoder().encode(snapshot) {
             defaults.set(data, forKey: defaultsKey)
         }
     }
